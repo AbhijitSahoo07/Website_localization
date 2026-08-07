@@ -1,0 +1,36 @@
+# Python gitignore rules
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+app/sql_app.db
+backend/app/sql_app.db
+sql_app.db
+*.db
+backend/venv/
+
+# Node/React gitignore rules
+node_modules/
+.next/
+out/
+build/
+dist/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# OS rules
+.DS_Store
+Thumbs.db
+
+# Gemini/Agent logs
+.agents/
+.gemini/
+brain/
+scratch/
+task-*.log
+*.log

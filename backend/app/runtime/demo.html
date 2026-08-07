@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Example Domain</title>
+    <meta name="description" content="This description is not exactly identical.">
+</head>
+<body>
+    <!-- Place this first so it matches a:nth-of-type(1) -->
+    <div style="text-align: center; margin: 10px;">
+        <a href="#content" style="color: #38bdf8;">Skip to content</a>
+    </div>
+
+    <div style="font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background: #1e293b; color: #f8fafc; border-radius: 8px;">
+        <h1 id="title-heading">Notice</h1>
+        <!-- Match selector 'li.tier-1.element-7' exactly for the Events text -->
+        <li class="tier-1 element-7" style="list-style-type: none; line-height: 1.6;">EventsPython EventsUser Group EventsPython Events ArchiveUser Group Events ArchiveSubmit an Event</li>
+        
+        <!-- This is now the second link, so it won't conflict with a:nth-of-type(1) -->
+        <p id="para-2"><a href="https://www.iana.org/domains/reserved" style="color: #38bdf8;">Learn more</a></p>
+    </div>
+
+    <!-- Override language to French before script runs -->
+    <script>
+        Object.defineProperty(navigator, 'language', {
+            value: 'fr-FR',
+            configurable: true
+        });
+    </script>
+    <script src="http://localhost:8000/runtime/loc.js" data-project="28" async></script>
+</body>
+</html>

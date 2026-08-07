@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+pydantic
+pydantic-settings
+playwright
+beautifulsoup4
+requests
+python-dotenv
+google-generativeai
+aiohttp
