@@ -358,7 +358,7 @@ sequenceDiagram
 * **Name**: Abhijit Sahoo
 * **Institute**: Synergy Institute of Engineering and Technology
 * **Role**: AI Engineering Intern
-* **Email**: abhijitsahoo07@gmail.com
+* **Email**: abhijitsahoo3371@gmail.com
 * **GitHub**: [@AbhijitSahoo07](https://github.com/AbhijitSahoo07)
 
 ---
