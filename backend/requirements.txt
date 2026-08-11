@@ -7,6 +7,6 @@ playwright
 beautifulsoup4
 requests
 python-dotenv
-google-generativeai
+google-genai
 aiohttp
 psycopg2-binary
