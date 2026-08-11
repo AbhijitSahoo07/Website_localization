@@ -283,7 +283,45 @@ def get_page(page_id: int, db: Session = Depends(get_db)):
     logger.info("API: Fetching page details for page_id: %d", page_id)
     page = db.query(Page).filter(Page.id == page_id).first()
     if not page:
-        logger.warning("API: Page %d not found", page_id)
+        # Synthetic IDs are generated as project_id * 1000 + index for in-memory crawl pages.
+        # Attempt to look up the page from the in-memory CRAWL_STATUSES registry.
+        project_id_guess = page_id // 1000
+        idx_guess = page_id % 1000
+        status_dict = CRAWL_STATUSES.get(project_id_guess)
+        if status_dict and idx_guess < len(status_dict.get("pages", [])):
+            p = status_dict["pages"][idx_guess]
+            transient_page = Page(
+                project_id=project_id_guess,
+                url=p["url"],
+                title=p["title"],
+                http_status=p["http_status"],
+                word_count=p["word_count"],
+                detected_language=p["detected_language"],
+                error_message=p["error_message"],
+                html_content=p["html_content"]
+            )
+            res = PageResponse(
+                id=page_id,
+                project_id=project_id_guess,
+                url=p["url"],
+                title=p["title"],
+                http_status=p["http_status"],
+                word_count=p["word_count"],
+                detected_language=p["detected_language"],
+                error_message=p["error_message"],
+                is_selected=True,
+                translation_status="pending",
+                page_type=classify_page_type(p["url"], p["title"]),
+                crawl_issues=analyze_crawl_issues(transient_page),
+                crawl_timestamp=datetime.strptime(p["crawl_timestamp"], "%Y-%m-%dT%H:%M:%S.%f") if isinstance(p["crawl_timestamp"], str) else p["crawl_timestamp"],
+                html_content=p["html_content"]
+            )
+            return APIResponse(
+                success=True,
+                message="Page details retrieved (in-memory)",
+                data=res
+            )
+        logger.warning("API: Page %d not found in DB or in-memory store", page_id)
         raise HTTPException(status_code=404, detail="Page not found")
         
     res = PageResponse(

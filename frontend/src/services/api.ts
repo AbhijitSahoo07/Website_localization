@@ -269,7 +269,7 @@ export const extractPageSegments = async (pageId: number): Promise<TranslationSe
     if (!page) throw new Error("Page not found");
 
     // html_content is stripped from localStorage to prevent quota errors.
-    // If it's missing, fetch it on-demand from the backend (which stores it in its DB).
+    // If it's missing, fetch it on-demand from the backend (which stores it in its DB or in-memory).
     let htmlContent: string = page.html_content || '';
     if (!htmlContent) {
         try {
@@ -277,13 +277,18 @@ export const extractPageSegments = async (pageId: number): Promise<TranslationSe
             if (pageRes.data.success && pageRes.data.data.html_content) {
                 htmlContent = pageRes.data.data.html_content;
             }
-        } catch {
-            // Backend fetch failed — nothing we can do
+        } catch (err: any) {
+            // Log the reason so it's visible in the console, but don't surface the raw error yet.
+            console.warn(`[extractPageSegments] Could not fetch html_content for page ${pageId} from backend:`, err?.response?.status, err?.message);
         }
     }
 
     if (!htmlContent) {
-        throw new Error("Page HTML content is not available. Please re-crawl this page.");
+        throw new Error(
+            "Page HTML content is not available. " +
+            "The server may have restarted since the crawl (in-memory data was lost). " +
+            "Please re-crawl this page to restore the content."
+        );
     }
 
     // Call stateless extractor on the backend
