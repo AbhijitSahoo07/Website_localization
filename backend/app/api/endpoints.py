@@ -976,7 +976,7 @@ def publish_stateless(req: PublishRequest):
         
         file_path = os.path.join(runtime_dir, f"publish_{req.project_id}.json")
         with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+            json.dump(payload, f, ensure_ascii=True, indent=2)
             
         return APIResponse(
             success=True,

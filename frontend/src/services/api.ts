@@ -41,8 +41,23 @@ const getLocalData = <T>(key: string, defaultValue: T): T => {
 };
 
 const setLocalData = <T>(key: string, data: T) => {
-    if (typeof window !== 'undefined') {
+    if (typeof window === 'undefined') return;
+    try {
         localStorage.setItem(key, JSON.stringify(data));
+    } catch (e: any) {
+        // QuotaExceededError: strip heavy html_content from db_pages and retry
+        if (e && (e.name === 'QuotaExceededError' || e.code === 22)) {
+            try {
+                const pages = JSON.parse(localStorage.getItem('db_pages') || '[]');
+                const stripped = pages.map((p: any) => { const { html_content, ...rest } = p; return rest; });
+                localStorage.setItem('db_pages', JSON.stringify(stripped));
+                localStorage.setItem(key, JSON.stringify(data));
+            } catch {
+                console.warn('[localStorage] Still over quota after stripping html_content. Clearing db_pages.');
+                localStorage.removeItem('db_pages');
+                try { localStorage.setItem(key, JSON.stringify(data)); } catch { /* give up */ }
+            }
+        }
     }
 };
 
@@ -166,7 +181,10 @@ export const getProjectPages = async (projectId: number): Promise<Page[]> => {
                 translation_status: 'pending',
                 crawl_timestamp: p.crawl_timestamp || new Date().toISOString()
             }));
-            pages.push(...fetchedPages);
+            // Strip html_content before saving — it's the largest field and
+            // can exceed the 5 MB localStorage quota across multiple crawled pages.
+            const pagesToStore = fetchedPages.map(({ html_content, ...rest }: any) => rest);
+            pages.push(...pagesToStore);
             setLocalData('db_pages', pages);
             projectPages = fetchedPages;
         }
