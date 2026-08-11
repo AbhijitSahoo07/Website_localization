@@ -268,9 +268,27 @@ export const extractPageSegments = async (pageId: number): Promise<TranslationSe
     const page = pages.find(p => p.id === pageId);
     if (!page) throw new Error("Page not found");
 
+    // html_content is stripped from localStorage to prevent quota errors.
+    // If it's missing, fetch it on-demand from the backend (which stores it in its DB).
+    let htmlContent: string = page.html_content || '';
+    if (!htmlContent) {
+        try {
+            const pageRes = await api.get(`/pages/${pageId}`);
+            if (pageRes.data.success && pageRes.data.data.html_content) {
+                htmlContent = pageRes.data.data.html_content;
+            }
+        } catch {
+            // Backend fetch failed — nothing we can do
+        }
+    }
+
+    if (!htmlContent) {
+        throw new Error("Page HTML content is not available. Please re-crawl this page.");
+    }
+
     // Call stateless extractor on the backend
     const response = await api.post('/pages/extract-stateless', {
-        html_content: page.html_content
+        html_content: htmlContent
     });
 
     if (!response.data.success) {
