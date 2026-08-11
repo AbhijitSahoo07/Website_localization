@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { ProjectStatus } from '../types';
 
 type AppView = 'form' | 'progress' | 'dashboard' | 'editor' | 'publish';
@@ -18,20 +19,27 @@ interface CrawlerState {
     reset: () => void;
 }
 
-export const useCrawlerStore = create<CrawlerState>((set) => ({
-    projectId: null,
-    status: null,
-    isPolling: false,
-    view: 'form',
-    activePageId: null,
-    setProjectId: (id) => set({ projectId: id, view: 'progress' }),
-    setStatus: (status) => set({ status }),
-    startPolling: () => set({ isPolling: true }),
-    stopPolling: () => set({ isPolling: false }),
-    setView: (view) => set({ view }),
-    setActivePageId: (id) => set({ activePageId: id, view: id ? 'editor' : 'dashboard' }),
-    reset: () => set({ projectId: null, status: null, isPolling: false, view: 'form', activePageId: null }),
-}));
+export const useCrawlerStore = create<CrawlerState>()(
+    persist(
+        (set) => ({
+            projectId: null,
+            status: null,
+            isPolling: false,
+            view: 'form',
+            activePageId: null,
+            setProjectId: (id) => set({ projectId: id, view: 'progress' }),
+            setStatus: (status) => set({ status }),
+            startPolling: () => set({ isPolling: true }),
+            stopPolling: () => set({ isPolling: false }),
+            setView: (view) => set({ view }),
+            setActivePageId: (id) => set({ activePageId: id, view: id ? 'editor' : 'dashboard' }),
+            reset: () => set({ projectId: null, status: null, isPolling: false, view: 'form', activePageId: null }),
+        }),
+        {
+            name: 'crawler-store-persist', // unique storage key
+        }
+    )
+);
 
 
 

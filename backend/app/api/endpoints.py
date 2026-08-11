@@ -13,7 +13,7 @@ from app.schemas.page import PageResponse
 from app.schemas.translation_segment import TranslationSegmentResponse, TranslationSegmentUpdate
 from app.schemas.publish_version import PublishVersionResponse, PublishStatusResponse, RuntimePayload, RuntimeTranslation
 from app.schemas.response import APIResponse
-from app.crawler.engine import crawl_project
+from app.crawler.engine import crawl_project, normalize_url, is_internal_link, is_valid_page_link
 from app.services.analysis import classify_page_type, analyze_crawl_issues
 from app.services.translation import TranslationService, extract_segments
 from app.core.logging import get_logger
@@ -632,6 +632,19 @@ def get_runtime_payload(project_id: int, db: Session = Depends(get_db)):
     Publicly accessible (CORS wildcard applied in main.py for this route).
     """
     logger.info("API: Runtime payload requested for project_id: %d", project_id)
+    
+    # Try file storage first (stateless mode)
+    import os
+    import json
+    file_path = os.path.join(os.path.dirname(__file__), "..", "runtime", f"publish_{project_id}.json")
+    if os.path.exists(file_path):
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error("Failed to read publish file for project %d: %s", project_id, str(e))
+
+    # Fallback to database if available
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -661,11 +674,7 @@ def get_runtime_payload(project_id: int, db: Session = Depends(get_db)):
 @router.get("/projects/{project_id}/script")
 def get_script_snippet(project_id: int, request: Request, db: Session = Depends(get_db)):
     """Return the embeddable script HTML snippet for this project."""
-    project = db.query(Project).filter(Project.id == project_id).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    # Get the base URL dynamically from the request headers/host
+    # We do NOT require the project to exist in the database for stateless mode.
     base_url = str(request.base_url).rstrip('/')
     snippet = f'<script src="{base_url}/runtime/loc.js" data-project="{project_id}" async></script>'
     return APIResponse(
@@ -673,3 +682,242 @@ def get_script_snippet(project_id: int, request: Request, db: Session = Depends(
         message="Script snippet generated",
         data={"snippet": snippet, "project_id": project_id}
     )
+
+# ─── Stateless Schemas and Endpoints ──────────────────────────────────────────
+
+class CrawlRequest(BaseModel):
+    url: str
+    max_depth: int = 2
+    max_pages: int = 10
+
+class CrawledPage(BaseModel):
+    url: str
+    title: str = ""
+    html_content: str = ""
+    word_count: int = 0
+    detected_language: str = ""
+    http_status: int = 200
+    error_message: str = ""
+
+@router.post("/projects/crawl-stateless", response_model=APIResponse[List[CrawledPage]])
+async def crawl_stateless(req: CrawlRequest):
+    """
+    Crawls the requested URL up to max_pages and max_depth,
+    returning the crawled pages and their HTML directly in the response.
+    """
+    logger.info("Stateless Crawl: Starting crawl for url: %s", req.url)
+    from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+    from bs4 import BeautifulSoup
+    
+    start_url = req.url
+    max_depth = req.max_depth
+    max_pages = req.max_pages
+    
+    visited = set()
+    queued_or_visited = {normalize_url(start_url)}
+    queue = [(start_url, 0)]  # (url, depth)
+    pages_crawled = 0
+    crawled_results = []
+    
+    try:
+        async with async_playwright() as p:
+            logger.info("Stateless Crawl: Launching headless Chromium browser")
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            
+            while queue and pages_crawled < max_pages:
+                current_url, current_depth = queue.pop(0)
+                normalized_url_str = normalize_url(current_url)
+                
+                if normalized_url_str in visited:
+                    continue
+                    
+                visited.add(normalized_url_str)
+                pages_crawled += 1
+                logger.info("Stateless Crawl: Page %d/%d (depth %d): %s", pages_crawled, max_pages, current_depth, current_url)
+                
+                page_data = CrawledPage(url=normalized_url_str)
+                
+                try:
+                    page = await context.new_page()
+                    response = await page.goto(current_url, timeout=15000, wait_until="domcontentloaded")
+                    
+                    if response:
+                        page_data.http_status = response.status
+                        if response.ok:
+                            html_content = await page.content()
+                            page_data.html_content = html_content
+                            page_data.title = await page.title() or ""
+                            
+                            soup = BeautifulSoup(html_content, 'html.parser')
+                            text = soup.get_text(separator=' ')
+                            words = text.split()
+                            page_data.word_count = len(words)
+                            
+                            html_tag = soup.find('html')
+                            if html_tag and html_tag.get('lang'):
+                                page_data.detected_language = html_tag.get('lang')
+                            
+                            # Extract links for next depth
+                            if current_depth < max_depth:
+                                links = await page.evaluate('''() => {
+                                    return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
+                                }''')
+                                
+                                for link in links:
+                                    norm_link = normalize_url(link)
+                                    if norm_link not in queued_or_visited:
+                                        if is_internal_link(start_url, link) and is_valid_page_link(link):
+                                            queued_or_visited.add(norm_link)
+                                            queue.append((link, current_depth + 1))
+                        else:
+                            page_data.error_message = f"HTTP Error {response.status}"
+                    else:
+                        page_data.error_message = "No response received"
+                    
+                    await page.close()
+                except PlaywrightTimeoutError:
+                    page_data.error_message = "Timeout occurred"
+                except Exception as e:
+                    page_data.error_message = f"Error: {str(e)}"
+                
+                crawled_results.append(page_data)
+                
+            await browser.close()
+            
+        return APIResponse(
+            success=True,
+            message=f"Stateless crawl completed. Discovered {len(crawled_results)} pages.",
+            data=crawled_results
+        )
+    except Exception as e:
+        logger.exception("Stateless Crawl failed")
+        return APIResponse(success=False, message="Stateless crawl failed", errors=[str(e)])
+
+class ExtractRequest(BaseModel):
+    html_content: str
+
+class ExtractedSegment(BaseModel):
+    source_text: str
+    selector: str
+
+@router.post("/pages/extract-stateless", response_model=APIResponse[List[ExtractedSegment]])
+def extract_segments_stateless(req: ExtractRequest):
+    """
+    Parses HTML content and extracts translatable segments statelessly.
+    """
+    logger.info("Stateless Extract: Extracting segments from HTML")
+    try:
+        raw_segments = extract_segments(req.html_content)
+        extracted = []
+        for text, selector in raw_segments:
+            extracted.append(ExtractedSegment(source_text=text, selector=selector))
+            
+        return APIResponse(
+            success=True,
+            message="Segments extracted successfully",
+            data=extracted
+        )
+    except Exception as e:
+        logger.exception("Stateless Extract failed")
+        return APIResponse(success=False, message="Extraction failed", errors=[str(e)])
+
+class TranslationSegmentItem(BaseModel):
+    source_text: str
+    selector: str
+
+class TranslateRequest(BaseModel):
+    segments: List[TranslationSegmentItem]
+    target_language: str
+
+class TranslatedSegmentItem(BaseModel):
+    source_text: str
+    selector: str
+    translated_text: str
+
+@router.post("/pages/translate-stateless", response_model=APIResponse[List[TranslatedSegmentItem]])
+def translate_segments_stateless(req: TranslateRequest):
+    """
+    Translates provided segments using Gemini API statelessly.
+    """
+    logger.info("Stateless Translate: Translating %d segments into %s", len(req.segments), req.target_language)
+    try:
+        ts = TranslationService()
+        import concurrent.futures
+        
+        results = []
+        def worker(item: TranslationSegmentItem):
+            try:
+                translated = ts.translate_text(item.source_text, req.target_language)
+                return TranslatedSegmentItem(
+                    source_text=item.source_text,
+                    selector=item.selector,
+                    translated_text=translated
+                )
+            except Exception as e:
+                logger.error("Failed to translate: %s, error: %s", item.source_text[:30], str(e))
+                return TranslatedSegmentItem(
+                    source_text=item.source_text,
+                    selector=item.selector,
+                    translated_text=f"[Error: {str(e)}]"
+                )
+                
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            future_to_item = {executor.submit(worker, item): item for item in req.segments}
+            for future in concurrent.futures.as_completed(future_to_item):
+                results.append(future.result())
+                
+        return APIResponse(
+            success=True,
+            message="Segments translated successfully",
+            data=results
+        )
+    except Exception as e:
+        logger.exception("Stateless Translate failed")
+        return APIResponse(success=False, message="Translation failed", errors=[str(e)])
+
+class PublishRequest(BaseModel):
+    project_id: int
+    target_language: str
+    translations: List[Dict[str, Any]]
+
+@router.post("/projects/publish-stateless", response_model=APIResponse[Dict[str, Any]])
+def publish_stateless(req: PublishRequest):
+    """
+    Saves published translations to a static JSON file on disk,
+    allowing loc.js to fetch them dynamically without querying a database.
+    """
+    import os
+    import json
+    
+    logger.info("Stateless Publish: Publishing project %d into %s", req.project_id, req.target_language)
+    try:
+        payload = {
+            "project_id": req.project_id,
+            "version": 1,
+            "target_language": req.target_language,
+            "translations": req.translations
+        }
+        
+        # Write to static file inside the runtime directory
+        runtime_dir = os.path.join(os.path.dirname(__file__), "..", "runtime")
+        os.makedirs(runtime_dir, exist_ok=True)
+        
+        file_path = os.path.join(runtime_dir, f"publish_{req.project_id}.json")
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            
+        return APIResponse(
+            success=True,
+            message="Project published successfully",
+            data={
+                "project_id": req.project_id,
+                "version": 1,
+                "target_language": req.target_language
+            }
+        )
+    except Exception as e:
+        logger.exception("Stateless Publish failed")
+        return APIResponse(success=False, message="Publish failed", errors=[str(e)])
