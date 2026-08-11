@@ -72,7 +72,18 @@
 
   var scriptEl = getCurrentScript();
   var projectId = scriptEl ? scriptEl.getAttribute("data-project") : null;
+  
+  // Dynamically resolve backend API URL from the script's src
   var apiBase = "http://localhost:8000/api";
+  if (scriptEl) {
+    var src = scriptEl.getAttribute("src");
+    if (src && (src.indexOf("http://") === 0 || src.indexOf("https://") === 0)) {
+      var parts = src.split("/");
+      if (parts.length >= 3) {
+        apiBase = parts[0] + "//" + parts[2] + "/api";
+      }
+    }
+  }
   var cacheKey = "loc_cache_" + projectId;
 
   if (!projectId) {

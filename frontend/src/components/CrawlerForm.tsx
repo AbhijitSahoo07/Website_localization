@@ -8,6 +8,39 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 
+const SUPPORTED_LANGUAGES = [
+    "Arabic",
+    "Bengali",
+    "Chinese",
+    "Czech",
+    "Danish",
+    "Dutch",
+    "Finnish",
+    "French",
+    "German",
+    "Greek",
+    "Hebrew",
+    "Hindi",
+    "Hungarian",
+    "Indonesian",
+    "Italian",
+    "Japanese",
+    "Korean",
+    "Malay",
+    "Norwegian",
+    "Persian",
+    "Polish",
+    "Portuguese",
+    "Romanian",
+    "Russian",
+    "Spanish",
+    "Swedish",
+    "Thai",
+    "Turkish",
+    "Ukrainian",
+    "Vietnamese"
+];
+
 export default function CrawlerForm() {
     const { setProjectId, startPolling } = useCrawlerStore();
     const [url, setUrl] = useState("");
@@ -46,7 +79,7 @@ export default function CrawlerForm() {
                     Website Localization
                 </CardTitle>
                 <CardDescription className="text-slate-400">
-                    Enter a website URL and target language to start crawling.
+                    Enter a website URL and select one of our {SUPPORTED_LANGUAGES.length} supported languages to start.
                 </CardDescription>
             </CardHeader>
             <form onSubmit={handleSubmit}>
@@ -68,19 +101,35 @@ export default function CrawlerForm() {
                         </div>
                     </div>
                     <div className="space-y-2">
-                        <label htmlFor="language" className="text-sm font-medium leading-none text-slate-300">
-                            Target Language
-                        </label>
+                        <div className="flex justify-between items-center">
+                            <label htmlFor="language" className="text-sm font-medium leading-none text-slate-300">
+                                Target Language
+                            </label>
+                            <span className="text-[10px] text-indigo-400 font-semibold bg-indigo-500/10 px-2 py-0.5 rounded-full border border-indigo-500/20">
+                                {SUPPORTED_LANGUAGES.length} Languages Supported
+                            </span>
+                        </div>
                         <div className="relative">
-                            <Languages className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
-                            <Input
+                            <Languages className="absolute left-3 top-2.5 h-4 w-4 text-slate-500 z-10" />
+                            <select
                                 id="language"
-                                placeholder="e.g., Spanish, fr, de-DE"
-                                className="pl-9 bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500"
+                                className="flex h-9 w-full rounded-lg border border-slate-700 bg-slate-800 pl-9 pr-8 py-1.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-colors disabled:cursor-not-allowed disabled:opacity-50 appearance-none"
                                 value={targetLanguage}
                                 onChange={(e) => setTargetLanguage(e.target.value)}
                                 required
-                            />
+                            >
+                                <option value="" disabled className="bg-slate-900 text-slate-400">Select target language...</option>
+                                {SUPPORTED_LANGUAGES.map((lang) => (
+                                    <option key={lang} value={lang} className="bg-slate-900 text-slate-200">
+                                        {lang}
+                                    </option>
+                                ))}
+                            </select>
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                                    <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                                </svg>
+                            </div>
                         </div>
                     </div>
                     {error && (

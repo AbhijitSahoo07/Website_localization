@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from pydantic import BaseModel
@@ -659,13 +659,15 @@ def get_runtime_payload(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/projects/{project_id}/script")
-def get_script_snippet(project_id: int, db: Session = Depends(get_db)):
+def get_script_snippet(project_id: int, request: Request, db: Session = Depends(get_db)):
     """Return the embeddable script HTML snippet for this project."""
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    snippet = f'<script src="http://localhost:8000/runtime/loc.js" data-project="{project_id}" async></script>'
+    # Get the base URL dynamically from the request headers/host
+    base_url = str(request.base_url).rstrip('/')
+    snippet = f'<script src="{base_url}/runtime/loc.js" data-project="{project_id}" async></script>'
     return APIResponse(
         success=True,
         message="Script snippet generated",

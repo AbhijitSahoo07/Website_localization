@@ -1,0 +1,28 @@
+services:
+  # 1. FastAPI Backend Service (Docker-based to support Playwright/Chromium dependencies)
+  - type: web
+    name: localization-backend
+    env: docker
+    plan: free
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false # User will input their Gemini API Key in the Render dashboard during setup
+      - key: PROJECT_NAME
+        value: "Website Localization Automation Tool"
+
+  # 2. Next.js Frontend Service (Node-based)
+  - type: web
+    name: localization-frontend
+    env: node
+    plan: free
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          name: localization-backend
+          type: web
+          property: url
