@@ -27,6 +27,39 @@ import {
     Check,
 } from "lucide-react";
 
+const LANG_TO_CODE: { [key: string]: string } = {
+    "spanish": "es",
+    "french": "fr",
+    "german": "de",
+    "portuguese": "pt",
+    "italian": "it",
+    "dutch": "nl",
+    "russian": "ru",
+    "chinese": "zh",
+    "japanese": "ja",
+    "korean": "ko",
+    "arabic": "ar",
+    "hindi": "hi",
+    "turkish": "tr",
+    "polish": "pl",
+    "swedish": "sv",
+    "danish": "da",
+    "finnish": "fi",
+    "norwegian": "no",
+    "czech": "cs",
+    "romanian": "ro",
+    "hungarian": "hu",
+    "ukrainian": "uk",
+    "vietnamese": "vi",
+    "thai": "th",
+    "indonesian": "id",
+    "malay": "ms",
+    "greek": "el",
+    "hebrew": "he",
+    "persian": "fa",
+    "bengali": "bn"
+};
+
 export default function PublishPanel() {
     const { projectId, setView } = useCrawlerStore();
     const [status, setStatus] = useState<PublishStatus | null>(null);
@@ -35,6 +68,9 @@ export default function PublishPanel() {
     const [loading, setLoading] = useState(true);
     const [isPublishing, setIsPublishing] = useState(false);
     const [copied, setCopied] = useState(false);
+    const [testCopied, setTestCopied] = useState(false);
+    const [targetLanguage, setTargetLanguage] = useState<string>("");
+    const [testSnippet, setTestSnippet] = useState<string>("");
     const [toast, setToast] = useState<{ type: "success" | "error"; msg: string } | null>(null);
 
     const showToast = (type: "success" | "error", msg: string) => {
@@ -53,6 +89,21 @@ export default function PublishPanel() {
             setStatus(s);
             setVersions(v || []);
             setSnippet(sc.snippet);
+
+            // Dynamically resolve target language and test snippet
+            if (typeof window !== "undefined") {
+                const localProjects = JSON.parse(localStorage.getItem("db_projects") || "[]");
+                const currentProject = localProjects.find((p: any) => p.id === projectId);
+                if (currentProject) {
+                    const lang = currentProject.target_language;
+                    setTargetLanguage(lang);
+
+                    const langLower = (lang || "").toLowerCase().trim();
+                    const code = LANG_TO_CODE[langLower] || "es";
+                    const ts = `<!-- Override browser language to ${lang} for local testing -->\n<script>\n    Object.defineProperty(navigator, 'language', {\n        value: '${code}',\n        configurable: true\n    });\n</script>`;
+                    setTestSnippet(ts);
+                }
+            }
         } catch (e) {
             console.error("Failed to load publish data", e);
         } finally {
@@ -98,6 +149,13 @@ export default function PublishPanel() {
         navigator.clipboard.writeText(snippet).then(() => {
             setCopied(true);
             setTimeout(() => setCopied(false), 2500);
+        });
+    };
+
+    const handleCopyTest = () => {
+        navigator.clipboard.writeText(testSnippet).then(() => {
+            setTestCopied(true);
+            setTimeout(() => setTestCopied(false), 2500);
         });
     };
 
@@ -290,6 +348,35 @@ export default function PublishPanel() {
                     Translations update automatically when you republish — no snippet changes needed.
                 </p>
             </div>
+
+            {/* Testing Helper Snippet */}
+            {testSnippet && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+                    <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4 text-indigo-400" />
+                        <p className="text-sm font-bold text-slate-200">Testing Override Snippet</p>
+                        <span className="ml-auto">
+                            <Button
+                                onClick={handleCopyTest}
+                                variant="outline"
+                                size="sm"
+                                className="border-slate-700 text-slate-300 hover:bg-slate-800 h-7 text-xs flex items-center gap-1.5"
+                            >
+                                {testCopied ? <Check className="h-3.5 w-3.5 text-emerald-400" /> : <Copy className="h-3.5 w-3.5" />}
+                                {testCopied ? "Copied!" : "Copy"}
+                            </Button>
+                        </span>
+                    </div>
+                    <div className="relative">
+                        <pre className="bg-slate-950 border border-slate-800 rounded-lg p-4 text-xs text-indigo-300 font-mono overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
+                            {testSnippet}
+                        </pre>
+                    </div>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                        To test translations on a page in your local browser (if it is not set to {targetLanguage}), paste this override helper snippet <strong>before</strong> the embed script tag.
+                    </p>
+                </div>
+            )}
 
             {/* Publish History */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
