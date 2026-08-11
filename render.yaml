@@ -22,4 +22,7 @@ services:
     startCommand: npm run start
     envVars:
       - key: NEXT_PUBLIC_API_URL
-        value: https://${localization-backend}/api
+        fromService:
+          name: localization-backend
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL

@@ -1,7 +1,12 @@
 import axios from 'axios';
 import { Project, ProjectStatus, Page, ProjectSummary, TranslationSegment, PublishVersion, PublishStatus } from '../types';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+let API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
+
+// Support Render's dynamic external URL by appending /api if it's not already present
+if (API_BASE_URL && !API_BASE_URL.endsWith('/api')) {
+    API_BASE_URL = `${API_BASE_URL.replace(/\/$/, '')}/api`;
+}
 
 const api = axios.create({
     baseURL: API_BASE_URL,
