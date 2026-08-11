@@ -22,31 +22,33 @@ import os
 base.Base.metadata.create_all(bind=engine)
 
 # Check and execute SQLite schema migrations (preserves existing data)
-try:
-    with engine.begin() as conn:
-        # Migrate pages table
-        res_pages = conn.execute(text("PRAGMA table_info(pages)"))
-        cols_pages = [r[1] for r in res_pages.fetchall()]
-        if "is_selected" not in cols_pages:
-            conn.execute(text("ALTER TABLE pages ADD COLUMN is_selected BOOLEAN DEFAULT 1"))
-        if "translation_status" not in cols_pages:
-            conn.execute(text("ALTER TABLE pages ADD COLUMN translation_status VARCHAR DEFAULT 'pending'"))
-            
-        # Migrate projects table
-        res_projects = conn.execute(text("PRAGMA table_info(projects)"))
-        cols_projects = [r[1] for r in res_projects.fetchall()]
-        if "max_pages" not in cols_projects:
-            conn.execute(text("ALTER TABLE projects ADD COLUMN max_pages INTEGER DEFAULT 50"))
-        if "max_depth" not in cols_projects:
-            conn.execute(text("ALTER TABLE projects ADD COLUMN max_depth INTEGER DEFAULT 3"))
-            
-        # Migrate translation_segments table
-        res_segs = conn.execute(text("PRAGMA table_info(translation_segments)"))
-        cols_segs = [r[1] for r in res_segs.fetchall()]
-        if cols_segs and "source_language" not in cols_segs:
-            conn.execute(text("ALTER TABLE translation_segments ADD COLUMN source_language VARCHAR DEFAULT 'en'"))
-except Exception as e:
-    print(f"SQLite migration failed (can be ignored if fresh db): {e}")
+# Skip on PostgreSQL — SQLAlchemy create_all handles schema there.
+if settings.DATABASE_URL.startswith("sqlite"):
+    try:
+        with engine.begin() as conn:
+            # Migrate pages table
+            res_pages = conn.execute(text("PRAGMA table_info(pages)"))
+            cols_pages = [r[1] for r in res_pages.fetchall()]
+            if "is_selected" not in cols_pages:
+                conn.execute(text("ALTER TABLE pages ADD COLUMN is_selected BOOLEAN DEFAULT 1"))
+            if "translation_status" not in cols_pages:
+                conn.execute(text("ALTER TABLE pages ADD COLUMN translation_status VARCHAR DEFAULT 'pending'"))
+                
+            # Migrate projects table
+            res_projects = conn.execute(text("PRAGMA table_info(projects)"))
+            cols_projects = [r[1] for r in res_projects.fetchall()]
+            if "max_pages" not in cols_projects:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN max_pages INTEGER DEFAULT 50"))
+            if "max_depth" not in cols_projects:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN max_depth INTEGER DEFAULT 3"))
+                
+            # Migrate translation_segments table
+            res_segs = conn.execute(text("PRAGMA table_info(translation_segments)"))
+            cols_segs = [r[1] for r in res_segs.fetchall()]
+            if cols_segs and "source_language" not in cols_segs:
+                conn.execute(text("ALTER TABLE translation_segments ADD COLUMN source_language VARCHAR DEFAULT 'en'"))
+    except Exception as e:
+        print(f"SQLite migration failed (can be ignored if fresh db): {e}")
 
 
 

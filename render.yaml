@@ -11,6 +11,10 @@ services:
         sync: false # User will input their Gemini API Key in the Render dashboard during setup
       - key: PROJECT_NAME
         value: "Website Localization Automation Tool"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: localization-db
+          property: connectionString
 
   # 2. Next.js Frontend Service (Node-based)
   - type: web
@@ -26,3 +30,10 @@ services:
           name: localization-backend
           type: web
           envVarKey: RENDER_EXTERNAL_URL
+
+databases:
+  # 3. Free Render PostgreSQL — data persists across backend restarts
+  - name: localization-db
+    plan: free
+    databaseName: localization
+    user: localization_user
