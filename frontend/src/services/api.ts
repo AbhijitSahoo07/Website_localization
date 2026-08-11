@@ -7,6 +7,26 @@ const api = axios.create({
     baseURL: API_BASE_URL,
 });
 
+// Self-healing: Clear corrupt large floating-point IDs from localStorage (from legacy code versions)
+if (typeof window !== 'undefined') {
+    try {
+        const projects = JSON.parse(localStorage.getItem('db_projects') || '[]');
+        const pages = JSON.parse(localStorage.getItem('db_pages') || '[]');
+        const hasCorruptIds = projects.some(p => Number(p.id) > 1e15) || pages.some(p => Number(p.id) > 1e15);
+        if (hasCorruptIds) {
+            console.warn("Self-healing: Corrupt large floating-point IDs detected in localStorage. Clearing database keys...");
+            localStorage.removeItem('db_projects');
+            localStorage.removeItem('db_pages');
+            localStorage.removeItem('db_segments');
+            localStorage.removeItem('db_versions');
+            localStorage.removeItem('crawler-store-persist'); // clear Zustand persist state
+            window.location.reload();
+        }
+    } catch (e) {
+        // Ignore parsing errors
+    }
+}
+
 // ─── Local Database Storage Helpers ───────────────────────────────────────────
 
 const getLocalData = <T>(key: string, defaultValue: T): T => {
