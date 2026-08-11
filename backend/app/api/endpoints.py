@@ -822,8 +822,8 @@ def extract_segments_stateless(req: ExtractRequest):
     try:
         raw_segments = extract_segments(req.html_content)
         extracted = []
-        for text, selector in raw_segments:
-            extracted.append(ExtractedSegment(source_text=text, selector=selector))
+        for item in raw_segments:
+            extracted.append(ExtractedSegment(source_text=item["source_text"], selector=item["selector"]))
             
         return APIResponse(
             success=True,

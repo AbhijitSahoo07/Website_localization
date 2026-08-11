@@ -13,7 +13,7 @@ class TranslationService:
         self.api_key = settings.GEMINI_API_KEY
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
-            self.model_name = "gemini-3.5-flash"
+            self.model_name = "gemini-3.5-flash-lite"
 
             logger.info("TranslationService: Gemini client initialized successfully")
         else:
