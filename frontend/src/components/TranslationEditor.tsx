@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 
 export default function TranslationEditor() {
-    const { activePageId, setActivePageId } = useCrawlerStore();
+    const { activePageId, setActivePageId, reset } = useCrawlerStore();
     const [page, setPage] = useState<Page | null>(null);
     const [segments, setSegments] = useState<TranslationSegment[]>([]);
     const [loading, setLoading] = useState(true);
@@ -74,6 +74,7 @@ export default function TranslationEditor() {
             setSegments(segmentData);
         } catch (error) {
             console.error("Failed to load segments", error);
+            reset();
         } finally {
             setLoading(false);
         }
