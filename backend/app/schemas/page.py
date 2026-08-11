@@ -16,6 +16,7 @@ class PageResponse(BaseModel):
     page_type: str
     crawl_issues: List[str]
     crawl_timestamp: datetime
+    html_content: Optional[str] = ""
 
     class Config:
         from_attributes = True

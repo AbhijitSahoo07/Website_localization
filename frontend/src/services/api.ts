@@ -12,7 +12,7 @@ if (typeof window !== 'undefined') {
     try {
         const projects = JSON.parse(localStorage.getItem('db_projects') || '[]');
         const pages = JSON.parse(localStorage.getItem('db_pages') || '[]');
-        const hasCorruptIds = projects.some(p => Number(p.id) > 1e15) || pages.some(p => Number(p.id) > 1e15);
+        const hasCorruptIds = projects.some((p: any) => Number(p.id) > 1e15) || pages.some((p: any) => Number(p.id) > 1e15);
         if (hasCorruptIds) {
             console.warn("Self-healing: Corrupt large floating-point IDs detected in localStorage. Clearing database keys...");
             localStorage.removeItem('db_projects');
@@ -76,28 +76,28 @@ const analyzeCrawlIssues = (page: any): string[] => {
 // ─── Project Endpoints ────────────────────────────────────────────────────────
 
 export const createProject = async (url: string, targetLanguage: string): Promise<Project> => {
-    // 1. Call stateless crawler on the backend
-    const response = await api.post('/projects/crawl-stateless', {
+    const projects = getLocalData<any[]>('db_projects', []);
+    const projectId = getNextId(projects);
+
+    // Start the asynchronous crawl job on the backend
+    const response = await api.post('/projects/crawl-async', {
+        project_id: projectId,
         url,
         max_depth: 2,
         max_pages: 10
     });
 
-    const crawledPages = response.data.data;
     if (!response.data.success) {
-        throw new Error(response.data.message || "Failed to crawl site");
+        throw new Error(response.data.message || "Failed to start asynchronous crawl");
     }
 
-    const projects = getLocalData<any[]>('db_projects', []);
-    const projectId = getNextId(projects);
-
-    // 2. Save project to localStorage db
+    // Save initial project to localStorage db with 'crawling' status
     const newProject: Project = {
         id: projectId,
         name: url,
         target_url: url,
         target_language: targetLanguage,
-        status: 'completed', // crawl is synchronous in stateless mode
+        status: 'crawling', 
         max_pages: 10,
         max_depth: 2,
         error_message: null,
@@ -107,51 +107,65 @@ export const createProject = async (url: string, targetLanguage: string): Promis
     projects.push(newProject);
     setLocalData('db_projects', projects);
 
-    // 3. Save pages to localStorage db
-    const pages = getLocalData<any[]>('db_pages', []);
-    let nextPageId = getNextId(pages);
-    const newPages = crawledPages.map((p: any) => ({
-        id: nextPageId++,
-        project_id: projectId,
-        url: p.url,
-        title: p.title || "",
-        http_status: p.http_status,
-        word_count: p.word_count,
-        detected_language: p.detected_language || "en",
-        html_content: p.html_content,
-        error_message: p.error_message || null,
-        is_selected: true,
-        translation_status: 'pending',
-        crawl_timestamp: new Date().toISOString()
-    }));
-    pages.push(...newPages);
-    setLocalData('db_pages', pages);
-
     return newProject;
 };
 
 export const getProjectStatus = async (projectId: number): Promise<ProjectStatus> => {
+    // Fetch real-time status from backend
+    const response = await api.get(`/projects/${projectId}/status`);
+    if (!response.data.success) {
+        throw new Error(response.data.message || "Failed to get project status");
+    }
+
+    const backendStatus = response.data.data;
+
+    // Sync with db_projects in localStorage
     const projects = getLocalData<any[]>('db_projects', []);
     const project = projects.find(p => p.id === projectId);
-    if (!project) throw new Error("Project not found");
-
-    const pages = getLocalData<any[]>('db_pages', []);
-    const projectPages = pages.filter(p => p.project_id === projectId);
-    const failedPages = projectPages.filter(p => p.error_message);
+    if (project && project.status !== backendStatus.status) {
+        project.status = backendStatus.status;
+        project.error_message = backendStatus.error_message;
+        project.updated_at = new Date().toISOString();
+        setLocalData('db_projects', projects);
+    }
 
     return {
-        status: project.status,
-        error_message: project.error_message || null,
-        pages_crawled: projectPages.length,
-        failed_pages: failedPages.length,
-        max_pages: project.max_pages,
-        max_depth: project.max_depth
+        status: backendStatus.status,
+        error_message: backendStatus.error_message || null,
+        pages_crawled: backendStatus.pages_crawled,
+        failed_pages: backendStatus.failed_pages,
+        max_pages: backendStatus.max_pages,
+        max_depth: backendStatus.max_depth
     };
 };
 
 export const getProjectPages = async (projectId: number): Promise<Page[]> => {
     const pages = getLocalData<any[]>('db_pages', []);
-    const projectPages = pages.filter(p => p.project_id === projectId);
+    let projectPages = pages.filter(p => p.project_id === projectId);
+
+    // If pages are not yet cached in localStorage, fetch them from the backend
+    if (projectPages.length === 0) {
+        const response = await api.get(`/projects/${projectId}/pages`);
+        if (response.data.success && response.data.data.length > 0) {
+            const fetchedPages = response.data.data.map((p: any) => ({
+                id: p.id,
+                project_id: projectId,
+                url: p.url,
+                title: p.title || "",
+                http_status: p.http_status,
+                word_count: p.word_count,
+                detected_language: p.detected_language || "en",
+                html_content: p.html_content || "",
+                error_message: p.error_message || null,
+                is_selected: true,
+                translation_status: 'pending',
+                crawl_timestamp: p.crawl_timestamp || new Date().toISOString()
+            }));
+            pages.push(...fetchedPages);
+            setLocalData('db_pages', pages);
+            projectPages = fetchedPages;
+        }
+    }
 
     return projectPages.map(p => ({
         id: p.id,

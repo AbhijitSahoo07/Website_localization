@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
+from datetime import datetime
 from pydantic import BaseModel
 
 from app.database.session import get_db
@@ -94,6 +95,24 @@ def get_project(project_id: int, db: Session = Depends(get_db)):
 @router.get("/projects/{project_id}/status", response_model=APIResponse[Dict[str, Any]])
 def get_project_status(project_id: int, db: Session = Depends(get_db)):
     logger.info("API: Fetching crawl status for project_id: %d", project_id)
+    
+    # Check in-memory crawl status first (for stateless mode)
+    if project_id in CRAWL_STATUSES:
+        status_dict = CRAWL_STATUSES[project_id]
+        payload = {
+            "status": status_dict["status"],
+            "error_message": status_dict["error_message"],
+            "pages_crawled": status_dict["pages_crawled"],
+            "failed_pages": status_dict["failed_pages"],
+            "max_pages": status_dict["max_pages"],
+            "max_depth": status_dict["max_depth"]
+        }
+        return APIResponse(
+            success=True,
+            message="Project status retrieved (in-memory)",
+            data=payload
+        )
+
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         logger.warning("API: Project %d not found", project_id)
@@ -120,6 +139,44 @@ def get_project_status(project_id: int, db: Session = Depends(get_db)):
 @router.get("/projects/{project_id}/pages", response_model=APIResponse[List[PageResponse]])
 def get_project_pages(project_id: int, db: Session = Depends(get_db)):
     logger.info("API: Fetching pages list for project_id: %d", project_id)
+    
+    # Check in-memory crawl pages first (for stateless mode)
+    if project_id in CRAWL_STATUSES:
+        status_dict = CRAWL_STATUSES[project_id]
+        res = []
+        for idx, p in enumerate(status_dict["pages"]):
+            # Create a transient Page model instance to satisfy analyze_crawl_issues
+            transient_page = Page(
+                project_id=project_id,
+                url=p["url"],
+                title=p["title"],
+                http_status=p["http_status"],
+                word_count=p["word_count"],
+                detected_language=p["detected_language"],
+                error_message=p["error_message"]
+            )
+            res.append(PageResponse(
+                id=project_id * 1000 + idx,
+                project_id=project_id,
+                url=p["url"],
+                title=p["title"],
+                http_status=p["http_status"],
+                word_count=p["word_count"],
+                detected_language=p["detected_language"],
+                error_message=p["error_message"],
+                is_selected=True,
+                translation_status="pending",
+                page_type=classify_page_type(p["url"], p["title"]),
+                crawl_issues=analyze_crawl_issues(transient_page),
+                crawl_timestamp=datetime.strptime(p["crawl_timestamp"], "%Y-%m-%dT%H:%M:%S.%f") if isinstance(p["crawl_timestamp"], str) else p["crawl_timestamp"],
+                html_content=p["html_content"]
+            ))
+        return APIResponse(
+            success=True,
+            message="Project pages retrieved successfully (in-memory)",
+            data=res
+        )
+
     pages = db.query(Page).filter(Page.project_id == project_id).all()
     
     res = []
@@ -137,7 +194,8 @@ def get_project_pages(project_id: int, db: Session = Depends(get_db)):
             translation_status=p.translation_status,
             page_type=classify_page_type(p.url, p.title),
             crawl_issues=analyze_crawl_issues(p),
-            crawl_timestamp=p.crawl_timestamp
+            crawl_timestamp=p.crawl_timestamp,
+            html_content=p.html_content
         ))
         
     return APIResponse(
@@ -241,7 +299,8 @@ def get_page(page_id: int, db: Session = Depends(get_db)):
         translation_status=page.translation_status,
         page_type=classify_page_type(page.url, page.title),
         crawl_issues=analyze_crawl_issues(page),
-        crawl_timestamp=page.crawl_timestamp
+        crawl_timestamp=page.crawl_timestamp,
+        html_content=page.html_content
     )
     
     return APIResponse(
@@ -931,3 +990,151 @@ def publish_stateless(req: PublishRequest):
     except Exception as e:
         logger.exception("Stateless Publish failed")
         return APIResponse(success=False, message="Publish failed", errors=[str(e)])
+
+# ─── In-Memory Async Crawling Status Registry ─────────────────────────────────
+
+CRAWL_STATUSES: Dict[int, Dict[str, Any]] = {}
+
+class CrawlAsyncRequest(BaseModel):
+    project_id: int
+    url: str
+    max_depth: int = 2
+    max_pages: int = 10
+
+def start_crawl_task(project_id: int, url: str, max_depth: int, max_pages: int):
+    import asyncio
+    import sys
+    from datetime import datetime
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+        
+    async def run_async():
+        from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+        from bs4 import BeautifulSoup
+        
+        status = CRAWL_STATUSES.get(project_id)
+        if not status:
+            return
+            
+        visited = set()
+        queued_or_visited = {normalize_url(url)}
+        queue = [(url, 0)]  # (url, depth)
+        
+        try:
+            async with async_playwright() as p:
+                logger.info("Async Crawl Thread: Launching headless Chromium browser")
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+                
+                while queue and status["pages_crawled"] < max_pages:
+                    current_url, current_depth = queue.pop(0)
+                    normalized_url_str = normalize_url(current_url)
+                    
+                    if normalized_url_str in visited:
+                        continue
+                        
+                    visited.add(normalized_url_str)
+                    
+                    page_data = {
+                        "url": normalized_url_str,
+                        "title": "",
+                        "html_content": "",
+                        "word_count": 0,
+                        "detected_language": "",
+                        "http_status": 200,
+                        "error_message": None,
+                        "crawl_timestamp": datetime.now().isoformat()
+                    }
+                    
+                    try:
+                        page = await context.new_page()
+                        response = await page.goto(current_url, timeout=15000, wait_until="domcontentloaded")
+                        
+                        if response:
+                            page_data["http_status"] = response.status
+                            if response.ok:
+                                html_content = await page.content()
+                                page_data["html_content"] = html_content
+                                page_data["title"] = await page.title() or ""
+                                
+                                soup = BeautifulSoup(html_content, 'html.parser')
+                                text = soup.get_text(separator=' ')
+                                words = text.split()
+                                page_data["word_count"] = len(words)
+                                
+                                html_tag = soup.find('html')
+                                if html_tag and html_tag.get('lang'):
+                                    page_data["detected_language"] = html_tag.get('lang')
+                                
+                                # Extract links for next depth
+                                if current_depth < max_depth:
+                                    links = await page.evaluate('''() => {
+                                        return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
+                                    }''')
+                                    
+                                    for link in links:
+                                        norm_link = normalize_url(link)
+                                        if norm_link not in queued_or_visited:
+                                            if is_internal_link(url, link) and is_valid_page_link(link):
+                                                queued_or_visited.add(norm_link)
+                                                queue.append((link, current_depth + 1))
+                            else:
+                                page_data["error_message"] = f"HTTP Error {response.status}"
+                                status["failed_pages"] += 1
+                        else:
+                            page_data["error_message"] = "No response received"
+                            status["failed_pages"] += 1
+                        
+                        await page.close()
+                    except PlaywrightTimeoutError:
+                        page_data["error_message"] = "Timeout occurred"
+                        status["failed_pages"] += 1
+                    except Exception as e:
+                        page_data["error_message"] = f"Error: {str(e)}"
+                        status["failed_pages"] += 1
+                    
+                    status["pages"].append(page_data)
+                    status["pages_crawled"] += 1
+                    
+                await browser.close()
+                status["status"] = "completed"
+        except Exception as e:
+            logger.exception("Async Crawl failed")
+            status["status"] = "failed"
+            status["error_message"] = str(e)
+            
+    asyncio.run(run_async())
+
+@router.post("/projects/crawl-async")
+def crawl_async(req: CrawlAsyncRequest, background_tasks: BackgroundTasks):
+    """
+    Starts an asynchronous crawl job in the background, updating
+    an in-memory status registry so the client can poll progress.
+    """
+    logger.info("Async Crawl: Starting crawl task for project: %d, url: %s", req.project_id, req.url)
+    
+    CRAWL_STATUSES[req.project_id] = {
+        "status": "crawling",
+        "error_message": None,
+        "pages_crawled": 0,
+        "failed_pages": 0,
+        "max_pages": req.max_pages,
+        "max_depth": req.max_depth,
+        "pages": []
+    }
+    
+    background_tasks.add_task(
+        start_crawl_task,
+        project_id=req.project_id,
+        url=req.url,
+        max_depth=req.max_depth,
+        max_pages=req.max_pages
+    )
+    
+    return APIResponse(
+        success=True,
+        message="Asynchronous crawl task started",
+        data={"project_id": req.project_id}
+    )
