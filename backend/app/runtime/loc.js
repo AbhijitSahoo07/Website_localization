@@ -119,20 +119,35 @@
   /**
    * Replace only the direct text nodes of an element, preserving child elements.
    * If translated text is blank/null, keep original — never blank out content.
+   * Safety: never modify elements that have multiple child elements with text
+   * (e.g. nav lists, menus) to prevent content corruption.
    */
   function replaceTextNodes(el, translated) {
     if (!translated || translated.trim() === "") return; // safety: never blank
 
-    // For simple elements with only text content, set textContent directly
+    // For simple elements with only a single text node — safest case
     if (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE) {
       el.childNodes[0].nodeValue = translated;
       return;
     }
 
-    // For elements with mixed content (text + child elements),
-    // replace only the first meaningful text node
+    // Count how many child nodes carry meaningful text content
+    var textNodeCount = 0;
+    var elementChildCount = 0;
     for (var i = 0; i < el.childNodes.length; i++) {
-      var node = el.childNodes[i];
+      var n = el.childNodes[i];
+      if (n.nodeType === Node.TEXT_NODE && n.nodeValue.trim() !== "") textNodeCount++;
+      if (n.nodeType === Node.ELEMENT_NODE) elementChildCount++;
+    }
+
+    // Safety guard: if the element has multiple child elements (e.g. nav list,
+    // menu container), do NOT replace — it would corrupt/concatenate content.
+    if (elementChildCount > 1) return;
+
+    // For elements with mixed content (one text node + one child element),
+    // replace only the first meaningful direct text node
+    for (var j = 0; j < el.childNodes.length; j++) {
+      var node = el.childNodes[j];
       if (node.nodeType === Node.TEXT_NODE && node.nodeValue.trim() !== "") {
         node.nodeValue = translated;
         return;
@@ -164,31 +179,34 @@
 
   /**
    * Fallback: find an element in the DOM by matching its exact text content.
+   * Only matches leaf-like elements — elements where the direct text node
+   * exactly equals the original. Never matches containers with child elements.
    */
   function findElementByText(originalText) {
     if (!originalText || originalText.trim() === "") return null;
 
-    var tags = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "button", "a", "span", "li", "label"];
-    var bestMatch = null;
+    // Only use fallback for short, specific strings to avoid false positives
+    // on containers that contain many words (e.g. paragraphs, nav blocks).
     var cleanOriginal = originalText.trim();
+    if (cleanOriginal.length > 120) return null;
+
+    var tags = ["h1", "h2", "h3", "h4", "h5", "h6", "button", "a", "span", "label"];
 
     for (var i = 0; i < tags.length; i++) {
       var elems = document.getElementsByTagName(tags[i]);
       for (var j = 0; j < elems.length; j++) {
         var el = elems[j];
-        if (el.textContent.trim() === cleanOriginal) {
-          // Check if it has a direct text node child that matches
-          for (var k = 0; k < el.childNodes.length; k++) {
-            var node = el.childNodes[k];
-            if (node.nodeType === Node.TEXT_NODE && node.nodeValue.trim() === cleanOriginal) {
-              return el;
-            }
-          }
-          bestMatch = el;
+        // Must have exactly one text node child that matches — no child elements
+        if (
+          el.childNodes.length === 1 &&
+          el.childNodes[0].nodeType === Node.TEXT_NODE &&
+          el.childNodes[0].nodeValue.trim() === cleanOriginal
+        ) {
+          return el;
         }
       }
     }
-    return bestMatch;
+    return null;
   }
 
   /**
@@ -205,9 +223,15 @@
       }
 
       var el = findElement(t.selector);
+
+      // Only use text-based fallback for simple selectors (tag or tag#id).
+      // Skip fallback for complex class/nth-of-type selectors to avoid
+      // matching wrong elements on pages with different DOM structures.
       if (!el) {
-        // Fallback: search for any element containing the exact original text
-        el = findElementByText(t.original);
+        var isSimpleSelector = /^[a-z]+[0-9]*(#[\w-]+)?$/i.test(t.selector.trim());
+        if (isSimpleSelector) {
+          el = findElementByText(t.original);
+        }
       }
 
       if (!el) {

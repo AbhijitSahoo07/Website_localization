@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website Localization – Runtime Test</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background: linear-gradient(135deg, #0b0f19 0%, #111827 60%, #0f172a 100%);
+            color: #f3f4f6;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .card {
+            background: rgba(255,255,255,0.04);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 20px;
+            padding: 52px 44px;
+            max-width: 660px;
+            width: 100%;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(99,102,241,0.12);
+            border: 1px solid rgba(99,102,241,0.25);
+            color: #818cf8;
+            font-size: 0.75rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            padding: 5px 12px;
+            border-radius: 999px;
+            margin-bottom: 28px;
+        }
+        .dot {
+            width: 7px; height: 7px;
+            background: #6366f1;
+            border-radius: 50%;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%,100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.4; transform: scale(0.7); }
+        }
+        h1 {
+            font-size: 2.4rem;
+            font-weight: 700;
+            line-height: 1.2;
+            background: linear-gradient(90deg, #a5b4fc, #6366f1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 16px;
+        }
+        p {
+            color: #9ca3af;
+            font-size: 1.05rem;
+            line-height: 1.7;
+            margin-bottom: 12px;
+        }
+        .divider {
+            border: none;
+            border-top: 1px solid rgba(255,255,255,0.07);
+            margin: 28px 0;
+        }
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 24px;
+        }
+        .info-item {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.07);
+            border-radius: 10px;
+            padding: 14px 16px;
+        }
+        .info-label {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: #6b7280;
+            margin-bottom: 4px;
+        }
+        .info-value {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: #e5e7eb;
+            word-break: break-all;
+        }
+        .info-value.translated {
+            color: #34d399;
+        }
+    </style>
+
+    <!--
+        ════════════════════════════════════════════════════════
+        TESTING OVERRIDE SNIPPET
+        Copy this from the Publish Panel in the localization tool.
+        Replace 'hi' with your project's language code.
+        ════════════════════════════════════════════════════════
+    -->
+    <script>
+        Object.defineProperty(navigator, 'language', {
+            value: 'hi',
+            configurable: true
+        });
+        console.log('[demo] Mocked navigator.language =', navigator.language);
+    </script>
+</head>
+<body>
+    <div class="card">
+        <div class="badge">
+            <span class="dot"></span>
+            loc.js Runtime Test
+        </div>
+
+        <!-- ── Translatable content ───────────────────────────────────
+             The h1 below uses id="firstHeading" — this matches the
+             selector published for your project.
+             Replace with selectors from your own crawled pages.
+        ─────────────────────────────────────────────────────────── -->
+        <h1 id="firstHeading">Artificial intelligence</h1>
+
+        <p>
+            This page tests the <strong>loc.js</strong> runtime script loaded from
+            the deployed backend. When working, the heading above automatically
+            translates to the project's target language.
+        </p>
+        <p>
+            Expected Hindi translation:
+            <strong style="color:#a5b4fc;">कृत्रिम बुद्धिमत्ता</strong>
+        </p>
+
+        <hr class="divider">
+
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="info-label">Backend Source</div>
+                <div class="info-value" id="info-backend">Loading…</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Project ID</div>
+                <div class="info-value" id="info-project">—</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Mocked Language</div>
+                <div class="info-value translated" id="info-lang">hi (Hindi)</div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Translation Status</div>
+                <div class="info-value" id="info-status">Waiting…</div>
+            </div>
+        </div>
+    </div>
+
+    <!--
+        ════════════════════════════════════════════════════════
+        EMBED SCRIPT – copy from the Publish Panel.
+        Replace PROJECT_ID with your actual project id.
+        ════════════════════════════════════════════════════════
+    -->
+    <script src="http://localhost:8000/runtime/loc.js" data-project="1" async id="loc-script"></script>
+
+    <!-- Debug info panel updater -->
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            var scriptEl = document.getElementById('loc-script');
+            var src = scriptEl ? scriptEl.src : '(unknown)';
+            var projectId = scriptEl ? scriptEl.getAttribute('data-project') : '—';
+            document.getElementById('info-backend').textContent = src.split('/runtime')[0];
+            document.getElementById('info-project').textContent = projectId;
+
+            // Monitor the h1 for content changes (indicates translation applied)
+            var h1 = document.getElementById('firstHeading');
+            var originalText = h1 ? h1.textContent : '';
+            var intervalId = setInterval(function () {
+                if (h1 && h1.textContent !== originalText) {
+                    document.getElementById('info-status').textContent = '✅ Translated!';
+                    document.getElementById('info-status').style.color = '#34d399';
+                    clearInterval(intervalId);
+                }
+            }, 200);
+            setTimeout(function () {
+                clearInterval(intervalId);
+                if (document.getElementById('info-status').textContent === 'Waiting…') {
+                    document.getElementById('info-status').textContent = '⚠️ No match found';
+                    document.getElementById('info-status').style.color = '#f59e0b';
+                }
+            }, 8000);
+        });
+    </script>
+</body>
+</html>
