@@ -21,6 +21,12 @@ const setLocalData = <T>(key: string, data: T) => {
     }
 };
 
+const getNextId = (items: any[]): number => {
+    if (!items || items.length === 0) return 1;
+    const ids = items.map(item => Number(item.id)).filter(id => !isNaN(id));
+    return ids.length > 0 ? Math.max(...ids) + 1 : 1;
+};
+
 const classifyPageType = (url: string, title: string): string => {
     const urlLower = url.toLowerCase();
     const titleLower = (title || "").toLowerCase();
@@ -62,10 +68,10 @@ export const createProject = async (url: string, targetLanguage: string): Promis
         throw new Error(response.data.message || "Failed to crawl site");
     }
 
-    const projectId = Date.now(); // unique numeric ID
+    const projects = getLocalData<any[]>('db_projects', []);
+    const projectId = getNextId(projects);
 
     // 2. Save project to localStorage db
-    const projects = getLocalData<any[]>('db_projects', []);
     const newProject: Project = {
         id: projectId,
         name: url,
@@ -83,8 +89,9 @@ export const createProject = async (url: string, targetLanguage: string): Promis
 
     // 3. Save pages to localStorage db
     const pages = getLocalData<any[]>('db_pages', []);
-    const newPages = crawledPages.map((p: any, idx: number) => ({
-        id: projectId * 1000 + idx,
+    let nextPageId = getNextId(pages);
+    const newPages = crawledPages.map((p: any) => ({
+        id: nextPageId++,
         project_id: projectId,
         url: p.url,
         title: p.title || "",
@@ -222,10 +229,11 @@ export const extractPageSegments = async (pageId: number): Promise<TranslationSe
     // Remove existing segments for this page
     const segments = getLocalData<any[]>('db_segments', []);
     const filteredSegments = segments.filter(s => s.page_id !== pageId);
+    let nextSegmentId = getNextId(segments);
 
     // Save newly extracted segments
-    const newSegments: TranslationSegment[] = extracted.map((s: any, idx: number) => ({
-        id: pageId * 1000 + idx,
+    const newSegments: TranslationSegment[] = extracted.map((s: any) => ({
+        id: nextSegmentId++,
         page_id: pageId,
         source_text: s.source_text,
         source_language: "en",
@@ -431,10 +439,11 @@ export const publishProject = async (projectId: number): Promise<PublishVersion>
     }
 
     const versions = getLocalData<any[]>('db_versions', []);
+    const nextVersionId = getNextId(versions);
     const versionNum = versions.filter(v => v.project_id === projectId).length + 1;
 
     const newVersion: PublishVersion = {
-        id: Date.now(),
+        id: nextVersionId,
         project_id: projectId,
         version: versionNum,
         status: "Published",
