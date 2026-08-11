@@ -1036,10 +1036,11 @@ CRAWL_STATUSES: Dict[int, Dict[str, Any]] = {}
 class CrawlAsyncRequest(BaseModel):
     project_id: int
     url: str
+    target_language: str = "en"
     max_depth: int = 2
     max_pages: int = 10
 
-def start_crawl_task(project_id: int, url: str, max_depth: int, max_pages: int):
+def start_crawl_task(project_id: int, url: str, target_language: str, max_depth: int, max_pages: int):
     import asyncio
     import sys
     from datetime import datetime
@@ -1145,6 +1146,61 @@ def start_crawl_task(project_id: int, url: str, max_depth: int, max_pages: int):
             
     asyncio.run(run_async())
 
+    # ── Persist crawl results to DB so html_content survives server restarts ──
+    try:
+        from app.database.session import SessionLocal
+        db = SessionLocal()
+        try:
+            # Upsert project record with the frontend-generated ID
+            existing_project = db.query(Project).filter(Project.id == project_id).first()
+            if not existing_project:
+                new_project = Project(
+                    id=project_id,
+                    name=url,
+                    target_url=url,
+                    target_language=target_language,
+                    status=ProjectStatus.COMPLETED,
+                    max_pages=max_pages,
+                    max_depth=max_depth
+                )
+                db.add(new_project)
+                db.commit()
+                logger.info("Async Crawl: Persisted project %d to DB", project_id)
+            else:
+                existing_project.status = ProjectStatus.COMPLETED
+                db.commit()
+
+            # Upsert pages with explicit synthetic IDs so GET /pages/{id} resolves them
+            crawled_pages = CRAWL_STATUSES.get(project_id, {}).get("pages", [])
+            for idx, p in enumerate(crawled_pages):
+                page_id_val = project_id * 1000 + idx
+                existing_page = db.query(Page).filter(Page.id == page_id_val).first()
+                if not existing_page:
+                    new_page = Page(
+                        id=page_id_val,
+                        project_id=project_id,
+                        url=p["url"],
+                        title=p["title"],
+                        html_content=p["html_content"],
+                        http_status=p["http_status"],
+                        word_count=p["word_count"],
+                        detected_language=p["detected_language"],
+                        error_message=p["error_message"],
+                        is_selected=True,
+                        translation_status="pending",
+                        crawl_timestamp=datetime.strptime(p["crawl_timestamp"], "%Y-%m-%dT%H:%M:%S.%f") if isinstance(p["crawl_timestamp"], str) else p["crawl_timestamp"]
+                    )
+                    db.add(new_page)
+            db.commit()
+            logger.info("Async Crawl: Persisted %d pages for project %d to DB", len(crawled_pages), project_id)
+        except Exception as db_err:
+            db.rollback()
+            logger.exception("Async Crawl: Failed to persist crawl results to DB for project %d: %s", project_id, db_err)
+        finally:
+            db.close()
+    except Exception as import_err:
+        logger.exception("Async Crawl: DB import or session error: %s", import_err)
+
 @router.post("/projects/crawl-async")
 def crawl_async(req: CrawlAsyncRequest, background_tasks: BackgroundTasks):
     """
@@ -1167,6 +1223,7 @@ def crawl_async(req: CrawlAsyncRequest, background_tasks: BackgroundTasks):
         start_crawl_task,
         project_id=req.project_id,
         url=req.url,
+        target_language=req.target_language,
         max_depth=req.max_depth,
         max_pages=req.max_pages
     )

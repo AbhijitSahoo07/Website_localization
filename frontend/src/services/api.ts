@@ -103,6 +103,7 @@ export const createProject = async (url: string, targetLanguage: string): Promis
     const response = await api.post('/projects/crawl-async', {
         project_id: projectId,
         url,
+        target_language: targetLanguage,
         max_depth: 2,
         max_pages: 10
     });
