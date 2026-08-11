@@ -706,91 +706,101 @@ async def crawl_stateless(req: CrawlRequest):
     returning the crawled pages and their HTML directly in the response.
     """
     logger.info("Stateless Crawl: Starting crawl for url: %s", req.url)
-    from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
-    from bs4 import BeautifulSoup
+    import asyncio
     
-    start_url = req.url
-    max_depth = req.max_depth
-    max_pages = req.max_pages
-    
-    visited = set()
-    queued_or_visited = {normalize_url(start_url)}
-    queue = [(start_url, 0)]  # (url, depth)
-    pages_crawled = 0
-    crawled_results = []
-    
-    try:
-        async with async_playwright() as p:
-            logger.info("Stateless Crawl: Launching headless Chromium browser")
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+    def run_crawl_in_thread(url: str, max_depth: int, max_pages: int):
+        import asyncio
+        import sys
+        if sys.platform == "win32":
+            asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
             
-            while queue and pages_crawled < max_pages:
-                current_url, current_depth = queue.pop(0)
-                normalized_url_str = normalize_url(current_url)
+        async def run_async():
+            from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
+            from bs4 import BeautifulSoup
+            
+            visited = set()
+            queued_or_visited = {normalize_url(url)}
+            queue = [(url, 0)]  # (url, depth)
+            pages_crawled = 0
+            crawled_results = []
+            
+            async with async_playwright() as p:
+                logger.info("Stateless Crawl Thread: Launching headless Chromium browser")
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context(
+                    user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
                 
-                if normalized_url_str in visited:
-                    continue
+                while queue and pages_crawled < max_pages:
+                    current_url, current_depth = queue.pop(0)
+                    normalized_url_str = normalize_url(current_url)
                     
-                visited.add(normalized_url_str)
-                pages_crawled += 1
-                logger.info("Stateless Crawl: Page %d/%d (depth %d): %s", pages_crawled, max_pages, current_depth, current_url)
-                
-                page_data = CrawledPage(url=normalized_url_str)
-                
-                try:
-                    page = await context.new_page()
-                    response = await page.goto(current_url, timeout=15000, wait_until="domcontentloaded")
+                    if normalized_url_str in visited:
+                        continue
+                        
+                    visited.add(normalized_url_str)
+                    pages_crawled += 1
+                    logger.info("Stateless Crawl Thread: Page %d/%d (depth %d): %s", pages_crawled, max_pages, current_depth, current_url)
                     
-                    if response:
-                        page_data.http_status = response.status
-                        if response.ok:
-                            html_content = await page.content()
-                            page_data.html_content = html_content
-                            page_data.title = await page.title() or ""
-                            
-                            soup = BeautifulSoup(html_content, 'html.parser')
-                            text = soup.get_text(separator=' ')
-                            words = text.split()
-                            page_data.word_count = len(words)
-                            
-                            html_tag = soup.find('html')
-                            if html_tag and html_tag.get('lang'):
-                                page_data.detected_language = html_tag.get('lang')
-                            
-                            # Extract links for next depth
-                            if current_depth < max_depth:
-                                links = await page.evaluate('''() => {
-                                    return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
-                                }''')
+                    page_data = CrawledPage(url=normalized_url_str)
+                    
+                    try:
+                        page = await context.new_page()
+                        response = await page.goto(current_url, timeout=15000, wait_until="domcontentloaded")
+                        
+                        if response:
+                            page_data.http_status = response.status
+                            if response.ok:
+                                html_content = await page.content()
+                                page_data.html_content = html_content
+                                page_data.title = await page.title() or ""
                                 
-                                for link in links:
-                                    norm_link = normalize_url(link)
-                                    if norm_link not in queued_or_visited:
-                                        if is_internal_link(start_url, link) and is_valid_page_link(link):
-                                            queued_or_visited.add(norm_link)
-                                            queue.append((link, current_depth + 1))
+                                soup = BeautifulSoup(html_content, 'html.parser')
+                                text = soup.get_text(separator=' ')
+                                words = text.split()
+                                page_data.word_count = len(words)
+                                
+                                html_tag = soup.find('html')
+                                if html_tag and html_tag.get('lang'):
+                                    page_data.detected_language = html_tag.get('lang')
+                                
+                                # Extract links for next depth
+                                if current_depth < max_depth:
+                                    links = await page.evaluate('''() => {
+                                        return Array.from(document.querySelectorAll('a[href]')).map(a => a.href);
+                                    }''')
+                                    
+                                    for link in links:
+                                        norm_link = normalize_url(link)
+                                        if norm_link not in queued_or_visited:
+                                            if is_internal_link(url, link) and is_valid_page_link(link):
+                                                queued_or_visited.add(norm_link)
+                                                queue.append((link, current_depth + 1))
+                            else:
+                                page_data.error_message = f"HTTP Error {response.status}"
                         else:
-                            page_data.error_message = f"HTTP Error {response.status}"
-                    else:
-                        page_data.error_message = "No response received"
+                            page_data.error_message = "No response received"
+                        
+                        await page.close()
+                    except PlaywrightTimeoutError:
+                        page_data.error_message = "Timeout occurred"
+                    except Exception as e:
+                        page_data.error_message = f"Error: {str(e)}"
                     
-                    await page.close()
-                except PlaywrightTimeoutError:
-                    page_data.error_message = "Timeout occurred"
-                except Exception as e:
-                    page_data.error_message = f"Error: {str(e)}"
-                
-                crawled_results.append(page_data)
-                
-            await browser.close()
+                    crawled_results.append(page_data)
+                    
+                await browser.close()
+            return crawled_results
             
+        return asyncio.run(run_async())
+
+    try:
+        loop = asyncio.get_running_loop()
+        results = await loop.run_in_executor(None, run_crawl_in_thread, req.url, req.max_depth, req.max_pages)
         return APIResponse(
             success=True,
-            message=f"Stateless crawl completed. Discovered {len(crawled_results)} pages.",
-            data=crawled_results
+            message=f"Stateless crawl completed. Discovered {len(results)} pages.",
+            data=results
         )
     except Exception as e:
         logger.exception("Stateless Crawl failed")
